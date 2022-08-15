@@ -20,4 +20,4 @@ Loosely based on BlindFTP from https://adullact.net/projects/blindftp/ but with 
     - e.g. on Windows: `arp -s <high side IP> <high side MAC> <low side IP>`
   - `python3 bftp_send.py -t <directory to scan for new files> -a <high side IP> -b`
 - Client will now run in a loop scanning the input directory and sending files as they appear. Directory structures are also preserved, so an entire directory tree can be dropped into the input directory and will then be recreated accurately on the high side.
-- Note that when using the -b switch (loop continually) files are removed from the input directory after they have been sent. Alternately use either -s or -t without also adding -b to run as a one-shot operation and then terminate.
+- Note that when using the -b switch (loop continually) files are removed from the input directory after they have been sent. Alternatively use either -s or -t without also adding -b to run as a one-shot operation without deleting and then terminate.
