@@ -1,13 +1,15 @@
 # bftp
-Data diode for sending files over a one-way fibre optic connection to an airgapped computer.
+Data diode written in Python for sending files over a one-way fibre optic connection to an airgapped computer.
 
 Loosely based on BlindFTP from https://adullact.net/projects/blindftp/ but with a fair amount of rewriting and enhancements.
 
 Hardware requirements:
 
 - Two computers with fibre network cards
+- rx of low side connected to something that always transmits e.g. a copper to fibre media converter (most fibre cards will not transmit unless they see light on the receive side)
 - tx of low side connected to rx of high side with a single fibre strand
-- tx of high side left unconnected (this may require specific network cards and/or driver versions as some cards aren't happy unless both fibres are connected)
+- tx of high side left unconnected
+- You may require specific network cards and/or driver versions as some cards aren't happy unless both fibres are connected in the normal way
 
 How to run:
 
