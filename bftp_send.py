@@ -53,34 +53,6 @@ global options
 options = None
 
 
-class SpeedLimiter:
-    def __init__(self, speed):
-        self.speed_max = speed * 1000 / 8
-        self.start_time = time.time()
-        self.sent_bytes = 0
-
-    def start_time(self):
-        self.start_time = time.time()
-        self.sent_bytes = 0
-
-    def add_data(self, data):
-        self.sent_bytes += data
-
-    def total_time(self):
-        return time.time() - self.start_time
-
-    def average_rate(self):
-        total_time = self.total_time()
-        if total_time == 0:
-            return 0
-        average_rate = self.sent_bytes / total_time
-        return average_rate
-
-    def limit_speed(self):
-        while self.average_rate() > self.speed_max:
-            time.sleep(0.01)
-
-
 def send_empty_directory(source_path, dest_rel_path, num_session=None, num_current_session_packet=None):
     """Sends an empty directory
 
@@ -146,8 +118,9 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
     cur_loop = 1
 
     file_size = os.path.getsize(source_path)
+    file_size_s = round(file_size / 1024)
 
-    print("Sending file %s (%d KB)" % (source_path, file_size / 1024))
+    print("Sending file %s (%s KB)" % (source_path, "{:,}".format(file_size_s)))
     if num_session is None:
         num_session = int(time.time())
         num_current_session_packet = 0
@@ -157,13 +130,15 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
     if length_dest_path > MAX_FILENAME_LEN:
         raise ValueError
 
-    f = open(source_path, 'rb')
-    buf = f.read(16384)
-    crc32 = binascii.crc32(buf)
-    while len(buf) != 0:
-        buf = f.read(16384)
-        crc32 = binascii.crc32(buf, crc32)
-    f.close()
+    secs_per_pkt = 1 / (options.speed / PACKET_SIZE)
+
+#    f = open(source_path, 'rb')
+#    buf = f.read(16384)
+#    crc32 = binascii.crc32(buf)
+#    while len(buf) != 0:
+#        buf = f.read(16384)
+#        crc32 = binascii.crc32(buf, crc32)
+#    f.close()
 
     data_size_max = PACKET_SIZE - LENGTH_HEADER - length_dest_path
     num_total_file_packets = (file_size + data_size_max - 1) / data_size_max
@@ -176,10 +151,11 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
         f = open(source_path, 'rb')
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        speed_limiter = SpeedLimiter(options.speed)
+
+        file_start_time = time.time()
 
         for num_current_file_packet in range(0, num_total_file_packets):
-            speed_limiter.limit_speed()
+            pkt_start_time = time.time()
 
             if remaining_data > data_size_max:
                 data_size = data_size_max
@@ -202,14 +178,12 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
                 num_total_file_packets,
                 file_size,
                 file_mtime,
-                crc32
+                0 #crc32
             )
 
             packet = header + str(dest_rel_path).encode() + data
             s.sendto(packet, (HOST, PORT))
             num_current_session_packet += 1
-
-            speed_limiter.add_data(len(packet))
 
             # generate progress bar
             progress = int(100 * (num_current_file_packet + 1) / num_total_file_packets)
@@ -231,11 +205,22 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
 
             print("".join(progress_str), end='\r')
 
+            pkt_end_time = time.time()
+
+            try:
+                time.sleep(secs_per_pkt - (pkt_end_time - pkt_start_time))
+            except:
+                pass
+
         print()
         f.close()
 
-        print("Done in %.3f seconds (avg %d KBps)" % (
-            speed_limiter.total_time(), speed_limiter.average_rate() / 1024))
+        file_end_time = time.time()
+        file_total_time = file_end_time - file_start_time
+        speed_kbps = round((file_size / file_total_time) / 1024)
+
+        print("Done in %.2f seconds (%s KB/s)" % (
+            file_total_time, "{:,}".format(speed_kbps)))
         cur_loop = cur_loop + 1
 
     print("")
@@ -382,7 +367,7 @@ def analyse_options():
     parser.add_option("-p", dest="port", \
                       help="UDP port", type="int", default=36016)
     parser.add_option("-l", dest="speed", \
-                      help="Speed limit in Kbps (default 90000)", type="int", default=90000)
+                      help="Speed limit in bytes/s (default 9000000)", type="int", default=9000000)
     parser.add_option("-b", "--loop", action="store_true", dest="loop", \
                       default=False, help="Send files in loop (forces -t and -d)")
     parser.add_option("-P", dest="pause", \
