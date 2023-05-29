@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import syslog
 import binascii
 import hashlib
 import logging
@@ -18,9 +19,9 @@ import time
 import traceback
 
 PACKET_SIZE = 65500  # maximum packet size
-SEND_FILE_TIMES = 2
-QUEUE_SLEEP_SECONDS = 10
-SECONDS_BETWEEN_FILES = 0
+SEND_FILE_TIMES = 1
+QUEUE_SLEEP_SECONDS = 5
+SECONDS_BETWEEN_FILES = 1
 MAX_FILENAME_LEN = 1024  # maximum filename size
 DEBUG = False
 
@@ -65,6 +66,7 @@ def send_empty_directory(source_path, dest_rel_path, num_session=None, num_curre
     cur_loop = 1
 
     print("Sending directory %s" % (source_path))
+    syslog.syslog(syslog.LOG_INFO, "bftp: Sending directory " + source_path)
     while cur_loop <= SEND_FILE_TIMES:
         if num_session is None:
             num_session = int(time.time())
@@ -99,6 +101,7 @@ def send_empty_directory(source_path, dest_rel_path, num_session=None, num_curre
         num_current_session_packet += 1
 
         print("Transferred")
+        syslog.syslog(syslog.LOG_INFO, "bftp: Transferred")
         cur_loop = cur_loop + 1
 
     print("")
@@ -121,6 +124,7 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
     file_size_s = round(file_size / 1024)
 
     print("Sending file %s (%s KB)" % (source_path, "{:,}".format(file_size_s)))
+    syslog.syslog(syslog.LOG_INFO, "bftp: Sending file " + source_path + " ({:,} KB)".format(file_size_s))
     if num_session is None:
         num_session = int(time.time())
         num_current_session_packet = 0
@@ -148,7 +152,12 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
 
     while cur_loop <= SEND_FILE_TIMES:
         remaining_data = file_size
-        f = open(source_path, 'rb')
+        try:
+            f = open(source_path, 'rb')
+        except FileNotFoundError:
+            print("File disappeared")
+            syslog.syslog(syslog.LOG_INFO, "bftp: File disappeared")
+            return num_current_session_packet
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -221,6 +230,7 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
 
         print("Done in %.2f seconds (%s KB/s)" % (
             file_total_time, "{:,}".format(speed_kbps)))
+        syslog.syslog(syslog.LOG_INFO, "bftp: Done sending " + source_path + " in %.2f seconds (%s KB/s)" % (file_total_time, "{:,}".format(speed_kbps)))
         cur_loop = cur_loop + 1
 
     print("")
@@ -230,6 +240,7 @@ def do_send_file(source_path, dest_rel_path, num_session=None, num_current_sessi
 
 def sync_tree(directory, delete):
     print('Synchronising directory %s' % directory)
+    syslog.syslog(syslog.LOG_INFO, "bftp: Synchronising directory " + directory)
 
     directory = directory.rstrip("\\/")  # remove trailing slash (things break if it's present)
 
@@ -252,9 +263,11 @@ def sync_tree(directory, delete):
 
                 if delete:
                     print("Removing source file")
+                    syslog.syslog(syslog.LOG_INFO, "bftp: Removing source file")
                     os.remove(dirpath)
             except PermissionError:
                 print("Permission denied opening file")
+                syslog.syslog(syslog.LOG_INFO, "bftp: Permission denied opening file")
             except:
                 traceback.print_exc()
         for subdirname in subdirnamelist:
@@ -289,12 +302,23 @@ def send_queued_files(directory):
                     new_file_size = os.path.getsize(k)
                 except FileNotFoundError:
                     print('WARNING: %s disappeared' % k)
+                    syslog.syslog(syslog.LOG_INFO, "bftp: WARNING: " + k + " disappeared")
                     del QUEUE[k]
                     break
                 except:
                     pass
 
-                if old_file_size != new_file_size or new_file_size == None:
+                # when copying files in windows, it immediately sets target size = source size
+                # it will hold a lock until copying completes (which causes permissionerror)
+                permission_error = False
+                try:
+                    open(k).close()
+                except PermissionError:
+                    if DEBUG:
+                        print('INFO: PermissionError opening %s' % k)
+                    permission_error = True
+
+                if old_file_size != new_file_size or new_file_size == None or permission_error:
                     # file isn't ready yet
                     QUEUE[k] = (QUEUE_SLEEP_SECONDS, new_file_size, tmprelpath)
                 else:
@@ -302,7 +326,11 @@ def send_queued_files(directory):
                     THREAD_LOCK.release()
                     num_packet_session = do_send_file(k, tmprelpath, num_session, num_packet_session)
                     file_successfully_sent = True
-                    os.remove(k)
+                    try:
+                        os.remove(k)
+                    except:
+                        # maybe it already got deleted by something else
+                        pass
                     THREAD_LOCK.acquire()
                     del QUEUE[k]
                     break
@@ -349,6 +377,7 @@ def enqueue_loop(directory):
                         pass
 
                     print('Queueing %s' % dirpath)
+                    syslog.syslog(syslog.LOG_INFO, "bftp: Queueing " + dirpath)
                     QUEUE[dirpath] = (QUEUE_SLEEP_SECONDS, file_size, tmprelpath)
 
         THREAD_LOCK.release()
@@ -367,7 +396,7 @@ def analyse_options():
     parser.add_option("-p", dest="port", \
                       help="UDP port", type="int", default=36016)
     parser.add_option("-l", dest="speed", \
-                      help="Speed limit in bytes/s (default 9000000)", type="int", default=9000000)
+                      help="Speed limit in bytes/s (default 12000000)", type="int", default=12000000)
     parser.add_option("-b", "--loop", action="store_true", dest="loop", \
                       default=False, help="Send files in loop (forces -t and -d)")
     parser.add_option("-P", dest="pause", \
@@ -401,6 +430,7 @@ if __name__ == '__main__':
     PORT = options.port
 
     print("Starting BlindFTP")
+    syslog.syslog(syslog.LOG_INFO, "bftp: Starting BlindFTP")
 
     if options.debug:
         DEBUG = True
@@ -413,9 +443,10 @@ if __name__ == '__main__':
             do_send_file(target, os.path.basename(target))
     elif options.sync_tree:
         # sync directory tree
-        if not os.path.isdir(target):
-            print("Target is not a valid directory.")
-        else:
+        #if not os.path.isdir(target):
+        #    print("Target is not a valid directory.")
+        #else:
+        if 1:
             if options.loop:
                 # sends directory tree in a loop
                 threads = list()
@@ -441,3 +472,4 @@ if __name__ == '__main__':
 
     CONT_LOOPING = False
     print("Complete!")
+    syslog.syslog(syslog.LOG_INFO, "bftp: Complete!")

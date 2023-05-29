@@ -18,8 +18,7 @@ import traceback
 
 import TabBits
 
-TEMP_PATH="/mnt/share/recv/.~bftp/"
-#TEMP_PATH="/tmp/"
+TEMP_PATH="/mnt/void/recv/.~bftp/"
 
 PACKET_SIZE = 65500  # maximum packet size
 MAX_FILENAME_LEN = 1024  # maximum filename size
@@ -67,9 +66,8 @@ class File:
         self.crc32 = packet.crc32  # file crc32
 
     def cancel_download(self):
-        if isinstance(self.temp_file, file):
-            if not self.temp_file.closed:
-                self.temp_file.close()
+        if not self.temp_file.closed:
+            self.temp_file.close()
 
     def copy_to_dest(self, log_path):
         dest_dir = os.path.dirname(self.file_dest_path)
@@ -238,6 +236,12 @@ class Packet:
                 dest_file = PATH_DEST + "/" + self.file_name
                 if not os.path.exists(dest_file):
                     self.new_file(log_path)
+                else:
+                    # to prevent it spamming the "did not complete" error
+                    if self.current_file != self.file_name:
+                        print('WARNING: Ignoring existing file "%s"' % self.file_name)
+                        print('')
+                        self.current_file = self.file_name
 
         elif self.packet_type == PACKET_DIRECTORY:
             dest_dir = PATH_DEST + "/" + self.file_name
