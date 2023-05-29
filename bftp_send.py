@@ -19,7 +19,7 @@ import time
 import traceback
 
 PACKET_SIZE = 65500  # maximum packet size
-SEND_FILE_TIMES = 1
+SEND_FILE_TIMES = 2
 QUEUE_SLEEP_SECONDS = 5
 SECONDS_BETWEEN_FILES = 1
 MAX_FILENAME_LEN = 1024  # maximum filename size
